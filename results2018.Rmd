@@ -1,0 +1,348 @@
+---
+title: "Neck Lake Cutthroat Trout"
+author: "Adam Reimer"
+date: "January 8, 2019"
+output: html_document
+---
+
+```{r setup, echo = FALSE}
+knitr::opts_chunk$set(echo = FALSE, message = FALSE, warning = FALSE)
+library(magrittr)
+raw <- 
+  readxl::read_xlsx(".\\Neck 2018 AWL Data Combined To Adam 12_17_18.xlsx",
+                    sheet = 1,
+                    range = "A4:K2191",
+                    col_names = c("date", "subarea", "depth", "trap", "gear", "fl", "tag", "clip", "comment"),
+                    col_types = c(rep("skip", 2), "date", "numeric", rep("text", 7)))
+```
+##Data Cleaning
+I'll start by explaining some of the data cleaning decisions I made in case some of those were errors. First, along with the tag numbers there were some comments in the tag field:
+```{r}
+raw[raw$tag %in% c("Lost tag", "NONE", "second event recap"), ] %>% 
+  knitr::kable()
+```
+  
+I assumed the fish with the comment "Lost tag" should be treated as a recapture (because it still has the fin clip) while the fish with the comment "second event recap" should all be deleted. Fish with the comment "NONE" should also be deleted as long as the clip field also says "NONE". Here are the things listed under clip that are not actual clip codes:
+```{r}
+raw[raw$clip %in% c("NO", "NONE"), ] %>% 
+  knitr::kable()
+```
+  
+We see a lot of the same fish as before. The fish with tag number 823 was apparently released before it was clipped but turns out it was recaptured, so we need to keep it in the data set. I also looked at the comments for anything of note:
+```{r}
+raw[which(raw$comment != "NA"), ] %>% knitr::kable()
+```
+  
+We have already discussed most of these fish but if a fish has the comment "Mort" and was released during the first event I delete that record since it's unavailable for recapture.
+  
+There are two tag numbers that only show up during the recapture event. You should look these up and see if it's a transcription error.
+```{r}
+fl <- 
+  raw %>% 
+  dplyr::left_join(data.frame(subarea = 1:9, area = rep(LETTERS[1:3], each = 3)), by = "subarea") %>%
+  dplyr::filter(!(tag %in% c("NONE", "second event recap")),
+                clip != "NONE") %>%
+  dplyr::mutate(event = ifelse(date < as.POSIXct("2018-06-15 UTC"), "mark", "recap"),
+                date = as.Date(date, format = "%B%d"),
+                depth = as.numeric(ifelse(depth == "HL", NA, depth)),
+                fl = as.numeric(ifelse(fl ==  "RECAP", NA, fl)),
+                comment = ifelse(tag == "second event recap", tag, comment),
+                tag = as.numeric(ifelse(tag %in% c("Lost tag", "NA", "NONE", "second event recap"), NA, tag)),
+                clip = ifelse(clip %in% c("NO", "NONE", "NA"), NA, clip),
+                comment = ifelse(comment == "NA", NA, comment)
+  ) %>%
+  dplyr::select(-trap, -subarea)
+
+n_records <- fl %>% dplyr::group_by(tag) %>% dplyr::summarise(n = n())
+dplyr::left_join(fl, n_records, "tag") %>% dplyr::filter(n == 1 & event == "recap")
+
+mr0 <- 
+  fl %>%
+  dplyr::filter((fl >= 180 | is.na(fl)),
+                !(comment == "Mort" & event == "mark" & is.na(tag))) %>%
+  dplyr::mutate(n1 = ifelse(event == "mark", 1, 0),
+                n2 = ifelse(event == "recap", 1, 0),
+                m2 = ifelse(event == "recap" & !is.na(tag), 1, 0))
+```
+We also need to take care of fish captured multiple times in during the same event. The columns of this table give the lake section where the fish was seen (A = 1:3, B = 4:6 C = 7:9) during each event. The table entries are numbers of fish. For example, 1 fish was initially marked in area B, captured a second time during the marking event in area A and then captured a third time during the marking event in area B. While some fish moved areas, for this analysis I used the record associated with the initial capture during each event.
+```{r}
+move <-
+  mr0 %>% 
+  dplyr::filter(!is.na(tag)) %>%
+  dplyr::arrange(tag, event, date, area) %>% 
+  dplyr::group_by(tag, event) %>% 
+  dplyr::summarise(area2 = ifelse(length(area) == 1, LETTERS[area], paste0(area, collapse = "")))
+table(move$event, move$area2)
+```
+Here are the relevant mark-recapture numbers after cleaning the data as described above.
+```{r}
+tags <- 
+  mr0 %>%
+  dplyr::filter(!is.na(tag)) %>%
+  dplyr::arrange(tag, event, date) %>%
+  dplyr::select(tag, event, date) %>%
+  dplyr::mutate(dup = 1)
+
+mr <-
+  dplyr::left_join(mr0, 
+                   tags[duplicated(tags[, c("tag", "event")]), -which(colnames(tags) == "event")], 
+                   by = c("tag", "date")) %>%
+  dplyr::filter(is.na(dup) | (tag == 547 & fl == 225))
+  
+n1 <- as.vector(table(mr$n1, mr$area)["1", ])
+n2 <- as.vector(table(mr$n2, mr$area)["1", ])
+m2 <- as.vector(table(mr$m2, mr$area)["1", ])
+u2 <- n2 - m2
+data.frame(area = c(LETTERS[1:3], "ALL"), marked = c(n1, sum(n1)), captured = c(n2, sum(n2)), recaptured = c(m2, sum(m2)))
+```
+  
+##Geographic stratification tests
+There was some mixing between events. In the table below, row labels give the area marked, column labels give the area recaptured and the table entries are numbers of fish.
+```{r}
+#mixing
+area <- 
+  dplyr::inner_join(mr[mr$n1 == 1, c("tag", "area")], 
+                    mr[mr$m2 == 1, c("tag", "area")], 
+                    by = "tag")
+(area_tab <- table(area$area.x, area$area.y))
+```
+Marked fractions were similar between recovery areas.
+```{r}
+#marked fractions
+mf <- 
+  data.frame(recovery_area = LETTERS[1:3],
+             marked = apply(area_tab, 1, sum), 
+             unmarked = u2 - apply(area_tab, 1, sum),
+             marked_fraction = round(apply(area_tab, 1, sum)/u2, 2))
+mf
+chisq.test(mf[, c("marked", "unmarked")])
+```
+Recovery rates were similar between marking areas.
+```{r}
+#recovery rates
+rr <- 
+  data.frame(mark_area = LETTERS[1:3],
+             recovered = apply(area_tab, 1, sum), 
+             not_recovered = n1- apply(area_tab, 1, sum),
+             recovery_rate = round(apply(area_tab, 1, sum)/n1, 2))
+rr
+chisq.test(rr[, c("recovered", "not_recovered")])
+```
+  
+##Size stratification tests
+The second event was a biased length sample. The result is marginal and KS tests are pretty sensitive but the recommended action (using only marking event data to estimate length composition) makes sense due to growth that seems to have occurred between the two events.
+  
+```{r}
+plot(ecdf(mr$fl[mr$n1 == 1]), main = "Size selectivity event 2")
+lines(ecdf(mr$fl[mr$m2 == 1]), col = "red")
+ks.test(mr$fl[mr$n1 == 1], mr$fl[mr$m2 == 1])
+
+plot(ecdf(mr$fl[mr$n2 == 1]), main = "Size selectivity event 1")
+lines(ecdf(mr$fl[mr$m2 == 1]), col = "red")
+ks.test(mr$fl[mr$n2 == 1], mr$fl[mr$m2 == 1])
+
+plot(ecdf(mr$fl[mr$n1 == 1]), main = "Size selectivity - overall")
+lines(ecdf(mr$fl[mr$n2 == 1]), col = "red")
+ks.test(mr$fl[mr$n1 == 1], mr$fl[mr$n2 == 1])
+
+grow <- 
+  dplyr::left_join(mr[mr$m2 == 1, ], mr[mr$n1 == 1, c("tag", "fl")], "tag") %>%
+  dplyr::mutate(d = fl.x - fl.y)
+mean_d <- mean(grow$d, na.rm = TRUE)
+```
+  
+##Growth Recruitment?
+The bad news is it looks like there was some growth recruitment. The plot below shows the difference in length measurements between marking and recapture (positive numbers represent growth). Negative differences are likely mismeasurements but so are the larger positive differences. The mean difference is `r round(mean_d, 2)` mm. It would be great to check all of these lengths for transcription errors, exc. If there is not an obvious error you should leave the recorded length in the data set as we will use these difference to adjust our abundance estimate and should include both growth and measurement error into the adjustment.
+  
+```{r message = FALSE}
+plot(grow$fl.y, grow$d)
+```
+
+##Abundance estimate
+In practice we likely included too many fish in the second event sample because some of the fish that met out 180mm threshold during the second event would not have met the threshold during the first event. I wrote a model to try an estimate the number of fish we would have included in the second event sample in the absence of growth. It's based on estimating growth that occurred between events as follows: 
+$$
+\delta_i \sim \textrm{Normal}(\mu,\sigma)
+$$
+where $\delta_i$ are the differences in length between tagged fish during the marking and recapture events. Using parameter estimates of $\mu$ and $\sigma$ we can predict `r length(fl$fl[fl$event == "recap"])` length differences $\delta^*_i$, one for each fish captured during the second event. An estimate of the number of fish captured during the second event which were greater than or equal to 180 mm FL during the first event $n_2^*$ is: 
+$$
+n_2^* = \sum I(fl^*_{i} \ge 180)\\
+fl^*_i = fl_i - \delta^*_i
+$$
+where $I()$ is an indicator function which equals one when a condition is true and 0 when a condition is false, $fl^*_i$ is the estimated length of fish $i$ captured during the recapture event at the time of the marking event, $fl_i$ is the measured length of fish $i$ captured during the recapture event. Estimation of abundance then follows a hypergeometric distribution:
+$$
+m_2 \sim \frac{{n_1 \choose m_2}{N - n_1 \choose n_2^* - m_2}}{N \choose n_2^*}  
+$$
+where $n_1$ is the number of fish marked in the marking event, $m_2$ are the number of marked fish captured during the recapture event and N is the estimated abundance.
+  
+```{r results = 'hide'}
+#N with growth recruitment
+library(jagsUI)
+dat <- list(n1 = sum(n1),
+            m2 = sum(m2),
+            n2 = length(fl$fl[fl$event == "recap"]),
+            n2_fl = fl$fl[fl$event == "recap"],
+            n_diff = length(grow$d[!is.na(grow$d)]),
+            diff = grow$d[!is.na(grow$d)]
+)
+
+post <- jags(data = dat,
+             parameters.to.save = c("N", "n2_star", "mu", "sigma"),
+             model.file = ".\\mr_jags.r",
+             n.chains = 4,
+             n.iter = 1000,
+             n.burnin = 500,
+             n.thin = 1,
+             parallel = TRUE
+)
+
+N <- post$summary["N", "mean"]
+se_N <- post$summary["N", "sd"]
+obj <- abs((c(post$summary["N", "97.5%"], post$summary["N", "2.5%"]) - post$summary["N", "mean"]) / post$summary["N", "mean"])
+N_naive <- (sum(n1) + 1) * (sum(n2) + 1) / (sum(m2) + 1) - 1
+```
+  
+The model was run in JAGS through R. All parameters converged successfully. As expected, estimates of the number of fish captured during the second event that were greater than or equal to 180 mm FL during the marking event, $n^*_2$ (`r round(post$summary["n2_star", "mean"], 0)`) is smaller than the number of fish measured greater than or equal to 180mm FL during the second event (`r sum(n2)`). This results in an smaller (and less precise) estimated abundance than we would have estimated without accounting for growth recruitment (`r round(N_naive)`). Precision was close to the objective (relative precision = `r round(max(obj), 3)`).
+```{r}
+post$summary[, c("mean", "sd", "2.5%", "50%", "97.5%", "Rhat")] %>% knitr::kable()
+```
+  
+Length composition also met precision objectives.
+```{r}
+lc <- 
+  mr %>% 
+  dplyr::mutate(sex = as.character(cut(fl, breaks = seq(180, 440, 20), include.lowest = TRUE))) %>%
+  dplyr::filter(event == "mark") %>%
+  dplyr::rename(length = fl)
+aslpack::asl(lc, 
+             totaldat = data.frame(total = N, se_total = se_N, stringsAsFactors = FALSE)) %>%
+  dplyr::select(-"age", -dplyr::ends_with("lg.z")) %>%
+  dplyr::mutate_at(c("p.z", "sd_p.z", "lci_p.z", "uci_p.z"), dplyr::funs(trimws(format(round(., 3), nsmall = 3)))) %>%
+  dplyr::mutate_at(c("n.z", "t.z", "sd_t.z"), as.integer) %>%
+  dplyr::mutate(p.z = paste0(p.z, " (", ifelse(sex =="Both", 0, sd_p.z), ")"),
+                ci_p.z = ifelse(sex =="Both", "", paste0(lci_p.z, " - ", uci_p.z)),
+                t.z = paste0(format(t.z, big.mark = ","),
+                             " (",
+                              trimws(format(round(sd_t.z, 0), big.mark = ",", nsmall = 0)),
+                              ")")) %>%
+  dplyr::rename(lg_group = sex) %>%
+  tidyr::gather_("measure", "value", gather_cols = c("n.z", "p.z", "ci_p.z", "t.z")) %>%
+  dplyr::mutate(stat_lab = factor(measure, levels = c("n.z",
+                                                      "p.z",
+                                                      "ci_p.z",
+                                                      "t.z"),
+                                    labels = c("Sample size",
+                                               "Proportion (SE)",
+                                               "95% CI(Proportion)",
+                                               "Abundance (SE)")),
+                lg_group = factor(lg_group, 
+                                  levels = c(as.character(cut(seq(190, 430, 20), breaks = seq(180, 440, 20), include.lowest = TRUE)), "All"))) %>%
+  dplyr::select(lg_group, stat_lab, value) %>%
+  tidyr::spread(stat_lab, value) %>%
+  knitr::kable(align = "r")
+```
+
+##Secondary Objectives
+###CPUE (fish per hour) by gear type
+```{r}
+library(lubridate)
+e1_raw <- 
+  readxl::read_xlsx(".\\Neck 2018 AWL Data Combined To Adam 12_17_18.xlsx",
+                    sheet = 3,
+                    range = "A4:V152",
+                    col_names = c("area", "trap", "gear", "rods", "date_set", "date_pull", "time_set", "time_pull", "depth",
+                                  "effort0", "ct_large", "ct_small", "dv", "coho", "sculpin", "kok", "sb", "comment"),
+                    col_types = c(rep("skip", 2), rep("text", 4), rep("date", 4), "text", rep("skip", 2), rep("numeric", 8), "text"))
+hour(e1_raw$date_set) <- hour(e1_raw$time_set)
+minute(e1_raw$date_set) <- minute(e1_raw$time_set)
+hour(e1_raw$date_pull) <- hour(e1_raw$time_pull)
+minute(e1_raw$date_pull) <- minute(e1_raw$time_pull)
+e1 <- 
+  e1_raw %>% 
+  dplyr::mutate(rods = as.numeric(ifelse(rods == "NA", NA, rods)),
+                gear = ifelse(is.na(rods), gear, "HL"),
+                depth = as.numeric(ifelse(depth == "HL", NA, depth)),
+                effort = ifelse(gear ==  "HL", 
+                                difftime(date_pull, date_set, units = "mins") * rods,
+                                difftime(date_pull, date_set, units = "mins")),
+                check = effort - effort0,
+                event = "mark"
+                ) %>%
+  dplyr::select(-trap, -time_set, -date_pull, -time_pull, -sculpin, -kok, -sb)
+
+e2_raw <- 
+  readxl::read_xlsx(".\\Neck 2018 AWL Data Combined To Adam 12_17_18.xlsx",
+                    sheet = 4,
+                    range = "A4:U185",
+                    col_names = c("area", "trap", "gear", "rods", "date_set", "date_pull", "time_set", "time_pull", "depth",
+                                  "effort0", "ct_large", "ct_small", "dv", "coho", "sculpin", "kok", "sb", "comment"),
+                    col_types = c(rep("skip", 2), rep("text", 4), rep("date", 4), "text", "skip", rep("numeric", 8), "text"))
+hour(e2_raw$date_set) <- hour(e2_raw$time_set)
+minute(e2_raw$date_set) <- minute(e2_raw$time_set)
+hour(e2_raw$date_pull) <- hour(e2_raw$time_pull)
+minute(e2_raw$date_pull) <- minute(e2_raw$time_pull)
+e2 <- 
+  e2_raw %>% 
+  dplyr::mutate(rods = as.numeric(ifelse(rods == "NA", NA, rods)),
+                gear = ifelse(is.na(rods), gear, "HL"),
+                depth = as.numeric(ifelse(depth == "HL", NA, depth)),
+                effort = ifelse(gear ==  "HL", 
+                                difftime(date_pull, date_set, units = "mins") * rods,
+                                difftime(date_pull, date_set, units = "mins")),
+                check = effort - effort0,
+                event = "recap"
+  ) %>%
+  dplyr::select(-trap, -time_set, -date_pull, -time_pull, -sculpin, -kok, -sb)
+
+e <-
+  rbind(e1, e2) %>%
+  dplyr::select(subarea = area, gear, depth, ct_large, ct_small, dv, coho, effort, event) %>%
+  dplyr::left_join(data.frame(subarea = as.character(1:9), area = rep(LETTERS[1:3], each = 3), stringsAsFactors = FALSE), by = "subarea") %>%
+  dplyr::select(-subarea) %>%
+  tidyr::gather(spp, n, -area, -gear, -depth, -effort, -event) %>%
+  dplyr::mutate(cpue = n / effort)
+
+myboot <-
+  function(dat, event, gear, spp){
+    #dat2 <- dat$cpue[dat$event == event & dat$gear == gear & dat$spp == spp]
+    dat2 <- dat$cpue[dat$gear == gear & dat$spp == spp]
+    boot <- boot::boot(dat2, function(x, n){mean(x[n])}, 500)
+    boot
+    boot_ci <- boot::boot.ci(boot, type = "perc")
+     data.frame(
+       #event = event,
+       gear = gear,
+       spp = spp,
+       mean = boot$t0,
+       lci = boot_ci$perc[4],
+       uci = boot_ci$perc[5]
+     )
+  }
+
+grid <-
+  expand.grid(#event = unique(e$event),
+              gear = unique(e$gear),
+              spp = unique(e$spp),
+              stringsAsFactors = FALSE)
+mapply(myboot,
+       #event = grid$event,
+       gear = grid$gear,
+       spp = grid$spp,
+       MoreArgs = list(dat = e),
+       SIMPLIFY = FALSE,
+       USE.NAMES = FALSE) %>%
+  do.call(rbind, .) %>%
+  knitr::kable(digits = 5)
+```
+  
+###CPUE varibility
+I'm not sure how to quantify the second task. We could demonstrate changes in CPUE and length composition under reduced datasets, but to what end? What result would be considered usable? One way to consider how CPUE changes with reduced datasets would be to look at how CPUE varies in time and space for each species.
+  
+```{r fig.height=8, fig.width = 7}
+library(ggplot2)
+ggplot(e[e$gear != "HL", ], aes(x = depth, y = cpue, shape = gear, color = area)) + geom_point() + facet_grid(spp~event, scales = "free")
+```
+  
+###Cutthroat trout length distribution by gear type
+```{r}
+ggplot(fl, aes(x = fl, color = gear)) + geom_density() + geom_vline(xintercept = 180) + facet_grid(event~.)
+```
