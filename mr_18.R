@@ -1,8 +1,8 @@
 library(magrittr)
 raw <- 
-  readxl::read_xlsx(".\\Neck 2018 AWL Data Combined To Adam 12_17_18.xlsx",
+  readxl::read_xlsx(".\\Neck 2018 AWL Data Combined To Adam 12_17_18 CJS Edits 1_23_19.xlsx",
                     sheet = 1,
-                    range = "A4:K2191",
+                    range = "A4:K2192",
                     col_names = c("date", "subarea", "depth", "trap", "gear", "fl", "tag", "clip", "comment"),
                     col_types = c(rep("skip", 2), "date", "numeric", rep("text", 7)))
 head(raw) # depth, fl and tag wrong class
@@ -12,7 +12,7 @@ lapply(raw, table, useNA = "ifany")
   # fl = "RECAP" should be NA
 raw[raw$tag %in% c("Lost tag", "NONE", "second event recap"), ] %>% 
   print(n = 100) 
-  #Keep "Lost tag", delete "NONE" and "second event recap"
+  #Keep "Lost tag", delete "second event recap" and "NONE" if clip == "NONE"
 raw[raw$clip %in% c("NO", "NONE"), ] %>% 
   print(n = 100) 
   raw[raw$tag == "823", ]
@@ -23,8 +23,9 @@ raw[which(raw$comment != "NA"), ] %>% print(n = 100)
 fl <- 
   raw %>% 
   dplyr::left_join(data.frame(subarea = 1:9, area = rep(LETTERS[1:3], each = 3)), by = "subarea") %>%
-  dplyr::filter(!(tag %in% c("NONE", "second event recap")),
-                clip != "NONE") %>%
+  dplyr::filter(tag != "NONE" && clip != "NONE") %>%
+  dplyr::filter(tag != "second event recap") %>%
+  dplyr::filter(clip != "NONE") %>%
   dplyr::mutate(event = ifelse(date < as.POSIXct("2018-06-15 UTC"), "mark", "recap"),
                 date = as.Date(date, format = "%B%d"),
                 depth = as.numeric(ifelse(depth == "HL", NA, depth)),
@@ -58,7 +59,8 @@ mr0[which(mr0$comment == "lost floy tag"), ] # should be a recap
 table(mr0$n1, mr0$n2, mr0$m2) #OK
 
 lapply(mr0, table, useNA = "ifany")
-mr0[is.na(mr0$clip), ] # Missing clips are morts are after recapture event or tag = 823 which was recaptured
+mr0[is.na(mr0$clip), ] # Missing clips are morts after recapture event or tag = 823 which was recaptured
+mr0[mr0$tag == 823, ]
 
 #Multiple captures during the same event
 move <-
@@ -68,7 +70,7 @@ move <-
   dplyr::group_by(tag, event) %>% 
   dplyr::summarise(area2 = ifelse(length(area) == 1, LETTERS[area], paste0(area, collapse = "")))
 table(move$event, move$area2)
-#40 extra rows
+#39 extra rows
 
 tags <- 
   mr0 %>%
@@ -81,7 +83,7 @@ mr <-
   dplyr::left_join(mr0, 
                    tags[duplicated(tags[, c("tag", "event")]), -which(colnames(tags) == "event")], 
                    by = c("tag", "date")) %>%
-  dplyr::filter(is.na(dup) | (tag == 547 & fl == 225))
+  dplyr::filter(is.na(dup))
   
 n1 <- as.vector(table(mr$n1, mr$area)["1", ])
 n2 <- as.vector(table(mr$n2, mr$area)["1", ])
@@ -102,12 +104,14 @@ mr %>%
   dplyr::group_by(tag) %>%
   dplyr::summarise(n1 = sum(n1), n2 = sum(n2), m2 = sum(m2)) %>%
   dplyr::filter(m2 == 1 & (n1 + n2 != 2))
-#tags 211 and 542 recorded during recapture event but not recorded during marking event.
+mr[mr$n1 == 1 & is.na(mr$tag), ]
+mr[mr$m2 == 1 & is.na(mr$tag), ]
 #One fish lost tag but still known recap due to fin clip.
+#two fish missing tag but had clip so retained.
 
 #marked fractions
 mf <- 
-  data.frame(area = LETTERS[1:3],
+  data.frame(recovery_area = LETTERS[1:3],
              marked = apply(area_tab, 1, sum), 
              unmarked = u2 - apply(area_tab, 1, sum),
              mf = round(apply(area_tab, 1, sum)/u2, 2))
@@ -136,7 +140,7 @@ lines(ecdf(mr$fl[mr$n2 == 1]), col = "red")
 ks.test(mr$fl[mr$n1 == 1], mr$fl[mr$n2 == 1])
 
 grow <- 
-  dplyr::left_join(mr[mr$m2 == 1, ], mr[mr$n1 == 1, c("tag", "fl")], "tag") %>%
+  dplyr::left_join(mr[mr$m2 == 1 & !is.na(mr$tag), ], mr[mr$n1 == 1 & !is.na(mr$tag), c("tag", "fl")], "tag") %>%
   dplyr::mutate(d = fl.x - fl.y)
 hist(grow$d)
 mean(grow$d, na.rm = TRUE)
@@ -163,8 +167,8 @@ post <- jags(data = dat,
              parameters.to.save = c("N", "n2_star", "mu", "sigma"),
              model.file = ".\\mr_jags.r",
              n.chains = 4,
-             n.iter = 2000,
-             n.burnin = 1000,
+             n.iter = 1000,
+             n.burnin = 500,
              n.thin = 1,
              parallel = TRUE
 )

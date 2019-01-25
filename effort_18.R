@@ -2,9 +2,9 @@ library(magrittr)
 library(lubridate)
 library(ggplot2)
 e1_raw <- 
-  readxl::read_xlsx(".\\Neck 2018 AWL Data Combined To Adam 12_17_18.xlsx",
+  readxl::read_xlsx(".\\Neck 2018 AWL Data Combined To Adam 12_17_18 CJS Edits 1_23_19.xlsx",
                     sheet = 3,
-                    range = "A4:V152",
+                    range = "A4:V182",
                     col_names = c("area", "trap", "gear", "rods", "date_set", "date_pull", "time_set", "time_pull", "depth",
                                   "effort0", "ct_large", "ct_small", "dv", "coho", "sculpin", "kok", "sb", "comment"),
                     col_types = c(rep("skip", 2), rep("text", 4), rep("date", 4), "text", rep("skip", 2), rep("numeric", 8), "text"))
@@ -31,7 +31,7 @@ lapply(e1, table, useNA = "ifany")
 e1[e1$check != 0, ]
 
 e2_raw <- 
-  readxl::read_xlsx(".\\Neck 2018 AWL Data Combined To Adam 12_17_18.xlsx",
+  readxl::read_xlsx(".\\Neck 2018 AWL Data Combined To Adam 12_17_18 CJS Edits 1_23_19.xlsx",
                     sheet = 4,
                     range = "A4:U185",
                     col_names = c("area", "trap", "gear", "rods", "date_set", "date_pull", "time_set", "time_pull", "depth",
@@ -58,6 +58,7 @@ e2 <-
   dplyr::select(-trap, -time_set, -date_pull, -time_pull, -sculpin, -kok, -sb)
 lapply(e2, table, useNA = "ifany")
 e2[grepl("open|Open", e2$comment), ]
+e2 <- e2[-grepl("open|Open", e2$comment), ]
 e2[e2$check != 0, ]
 
 e <-

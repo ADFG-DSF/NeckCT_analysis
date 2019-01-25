@@ -9,39 +9,19 @@ output: html_document
 knitr::opts_chunk$set(echo = FALSE, message = FALSE, warning = FALSE)
 library(magrittr)
 raw <- 
-  readxl::read_xlsx(".\\Neck 2018 AWL Data Combined To Adam 12_17_18.xlsx",
+  readxl::read_xlsx(".\\Neck 2018 AWL Data Combined To Adam 12_17_18 CJS Edits 1_23_19.xlsx",
                     sheet = 1,
-                    range = "A4:K2191",
+                    range = "A4:K2192",
                     col_names = c("date", "subarea", "depth", "trap", "gear", "fl", "tag", "clip", "comment"),
-                    col_types = c(rep("skip", 2), "date", "numeric", rep("text", 7)))
-```
-##Data Cleaning
-I'll start by explaining some of the data cleaning decisions I made in case some of those were errors. First, along with the tag numbers there were some comments in the tag field:
-```{r}
-raw[raw$tag %in% c("Lost tag", "NONE", "second event recap"), ] %>% 
-  knitr::kable()
-```
-  
-I assumed the fish with the comment "Lost tag" should be treated as a recapture (because it still has the fin clip) while the fish with the comment "second event recap" should all be deleted. Fish with the comment "NONE" should also be deleted as long as the clip field also says "NONE". Here are the things listed under clip that are not actual clip codes:
-```{r}
-raw[raw$clip %in% c("NO", "NONE"), ] %>% 
-  knitr::kable()
-```
-  
-We see a lot of the same fish as before. The fish with tag number 823 was apparently released before it was clipped but turns out it was recaptured, so we need to keep it in the data set. I also looked at the comments for anything of note:
-```{r}
-raw[which(raw$comment != "NA"), ] %>% knitr::kable()
-```
-  
-We have already discussed most of these fish but if a fish has the comment "Mort" and was released during the first event I delete that record since it's unavailable for recapture.
-  
-There are two tag numbers that only show up during the recapture event. You should look these up and see if it's a transcription error.
-```{r}
+                    col_types = c(rep("skip", 2), "date", "numeric", rep("text", 7))) %>%
+  dplyr::mutate(id = dplyr::row_number())
+
 fl <- 
   raw %>% 
   dplyr::left_join(data.frame(subarea = 1:9, area = rep(LETTERS[1:3], each = 3)), by = "subarea") %>%
-  dplyr::filter(!(tag %in% c("NONE", "second event recap")),
-                clip != "NONE") %>%
+  dplyr::filter(tag != "NONE" && clip != "NONE") %>%
+  dplyr::filter(tag != "second event recap") %>%
+  dplyr::filter(clip != "NONE") %>%
   dplyr::mutate(event = ifelse(date < as.POSIXct("2018-06-15 UTC"), "mark", "recap"),
                 date = as.Date(date, format = "%B%d"),
                 depth = as.numeric(ifelse(depth == "HL", NA, depth)),
@@ -52,9 +32,11 @@ fl <-
                 comment = ifelse(comment == "NA", NA, comment)
   ) %>%
   dplyr::select(-trap, -subarea)
-
-n_records <- fl %>% dplyr::group_by(tag) %>% dplyr::summarise(n = n())
-dplyr::left_join(fl, n_records, "tag") %>% dplyr::filter(n == 1 & event == "recap")
+```
+##Data Cleaning
+Here are the rows removed from the data set because they don't have any useful mark-recapture information.
+```{r}
+knitr::kable(raw[!(raw$id %in% fl$id), ])
 
 mr0 <- 
   fl %>%
@@ -63,7 +45,9 @@ mr0 <-
   dplyr::mutate(n1 = ifelse(event == "mark", 1, 0),
                 n2 = ifelse(event == "recap", 1, 0),
                 m2 = ifelse(event == "recap" & !is.na(tag), 1, 0))
+mr0$m2[which(mr0$comment == "lost floy tag")] <- 1
 ```
+  
 We also need to take care of fish captured multiple times in during the same event. The columns of this table give the lake section where the fish was seen (A = 1:3, B = 4:6 C = 7:9) during each event. The table entries are numbers of fish. For example, 1 fish was initially marked in area B, captured a second time during the marking event in area A and then captured a third time during the marking event in area B. While some fish moved areas, for this analysis I used the record associated with the initial capture during each event.
 ```{r}
 move <-
@@ -87,7 +71,7 @@ mr <-
   dplyr::left_join(mr0, 
                    tags[duplicated(tags[, c("tag", "event")]), -which(colnames(tags) == "event")], 
                    by = c("tag", "date")) %>%
-  dplyr::filter(is.na(dup) | (tag == 547 & fl == 225))
+  dplyr::filter(is.na(dup))
   
 n1 <- as.vector(table(mr$n1, mr$area)["1", ])
 n2 <- as.vector(table(mr$n2, mr$area)["1", ])
@@ -101,9 +85,9 @@ There was some mixing between events. In the table below, row labels give the ar
 ```{r}
 #mixing
 area <- 
-  dplyr::inner_join(mr[mr$n1 == 1, c("tag", "area")], 
-                    mr[mr$m2 == 1, c("tag", "area")], 
-                    by = "tag")
+  dplyr::left_join(mr[mr$n1 == 1, c("tag", "area")], 
+                   mr[mr$m2 == 1, c("tag", "area")], 
+                   by = "tag")
 (area_tab <- table(area$area.x, area$area.y))
 ```
 Marked fractions were similar between recovery areas.
@@ -146,13 +130,13 @@ lines(ecdf(mr$fl[mr$n2 == 1]), col = "red")
 ks.test(mr$fl[mr$n1 == 1], mr$fl[mr$n2 == 1])
 
 grow <- 
-  dplyr::left_join(mr[mr$m2 == 1, ], mr[mr$n1 == 1, c("tag", "fl")], "tag") %>%
+  dplyr::left_join(mr[mr$m2 == 1 & !is.na(mr$tag), ], mr[mr$n1 == 1 & !is.na(mr$tag), c("tag", "fl")], "tag") %>%
   dplyr::mutate(d = fl.x - fl.y)
 mean_d <- mean(grow$d, na.rm = TRUE)
 ```
   
 ##Growth Recruitment?
-The bad news is it looks like there was some growth recruitment. The plot below shows the difference in length measurements between marking and recapture (positive numbers represent growth). Negative differences are likely mismeasurements but so are the larger positive differences. The mean difference is `r round(mean_d, 2)` mm. It would be great to check all of these lengths for transcription errors, exc. If there is not an obvious error you should leave the recorded length in the data set as we will use these difference to adjust our abundance estimate and should include both growth and measurement error into the adjustment.
+The bad news is it looks like there was some growth recruitment. The plot below shows the difference in length measurements between marking and recapture (positive numbers represent growth). Negative differences are likely mismeasurements but so are the larger positive differences. The mean difference is `r round(mean_d, 2)` mm.
   
 ```{r message = FALSE}
 plot(grow$fl.y, grow$d)
@@ -189,8 +173,8 @@ post <- jags(data = dat,
              parameters.to.save = c("N", "n2_star", "mu", "sigma"),
              model.file = ".\\mr_jags.r",
              n.chains = 4,
-             n.iter = 1000,
-             n.burnin = 500,
+             n.iter = 1500,
+             n.burnin = 1000,
              n.thin = 1,
              parallel = TRUE
 )
@@ -246,9 +230,9 @@ aslpack::asl(lc,
 ```{r}
 library(lubridate)
 e1_raw <- 
-  readxl::read_xlsx(".\\Neck 2018 AWL Data Combined To Adam 12_17_18.xlsx",
+  readxl::read_xlsx(".\\Neck 2018 AWL Data Combined To Adam 12_17_18 CJS Edits 1_23_19.xlsx",
                     sheet = 3,
-                    range = "A4:V152",
+                    range = "A4:V182",
                     col_names = c("area", "trap", "gear", "rods", "date_set", "date_pull", "time_set", "time_pull", "depth",
                                   "effort0", "ct_large", "ct_small", "dv", "coho", "sculpin", "kok", "sb", "comment"),
                     col_types = c(rep("skip", 2), rep("text", 4), rep("date", 4), "text", rep("skip", 2), rep("numeric", 8), "text"))
@@ -270,7 +254,7 @@ e1 <-
   dplyr::select(-trap, -time_set, -date_pull, -time_pull, -sculpin, -kok, -sb)
 
 e2_raw <- 
-  readxl::read_xlsx(".\\Neck 2018 AWL Data Combined To Adam 12_17_18.xlsx",
+  readxl::read_xlsx(".\\Neck 2018 AWL Data Combined To Adam 12_17_18 CJS Edits 1_23_19.xlsx",
                     sheet = 4,
                     range = "A4:U185",
                     col_names = c("area", "trap", "gear", "rods", "date_set", "date_pull", "time_set", "time_pull", "depth",
