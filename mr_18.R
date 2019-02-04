@@ -84,6 +84,7 @@ mr <-
                    tags[duplicated(tags[, c("tag", "event")]), -which(colnames(tags) == "event")], 
                    by = c("tag", "date")) %>%
   dplyr::filter(is.na(dup))
+WriteXLS::WriteXLS("mr", ".\\clean mr data to craig.xlsx", BoldHeaderRow = TRUE)
   
 n1 <- as.vector(table(mr$n1, mr$area)["1", ])
 n2 <- as.vector(table(mr$n2, mr$area)["1", ])
