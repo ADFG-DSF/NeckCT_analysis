@@ -12,7 +12,7 @@ lapply(raw, table, useNA = "ifany")
   # fl = "RECAP" should be NA
 raw[raw$tag %in% c("Lost tag", "NONE", "second event recap"), ] %>% 
   print(n = 100) 
-  #Keep "Lost tag", delete "second event recap" and "NONE" if clip == "NONE"
+  #delete all
 raw[raw$clip %in% c("NO", "NONE"), ] %>% 
   print(n = 100) 
   raw[raw$tag == "823", ]
@@ -23,16 +23,15 @@ raw[which(raw$comment != "NA"), ] %>% print(n = 100)
 fl <- 
   raw %>% 
   dplyr::left_join(data.frame(subarea = 1:9, area = rep(LETTERS[1:3], each = 3)), by = "subarea") %>%
-  dplyr::filter(tag != "NONE" && clip != "NONE") %>%
-  dplyr::filter(tag != "second event recap") %>%
-  dplyr::filter(clip != "NONE") %>%
+  dplyr::filter(tag != "Lost tag") %>% #remove 1 records
+  dplyr::filter(tag != "NONE") %>% #remove 17 records
+  dplyr::filter(tag != "second event recap") %>% #remove 20 records
   dplyr::mutate(event = ifelse(date < as.POSIXct("2018-06-15 UTC"), "mark", "recap"),
                 date = as.Date(date, format = "%B%d"),
                 depth = as.numeric(ifelse(depth == "HL", NA, depth)),
                 fl = as.numeric(ifelse(fl ==  "RECAP", NA, fl)),
-                comment = ifelse(tag == "second event recap", tag, comment),
-                tag = as.numeric(ifelse(tag %in% c("Lost tag", "NA", "NONE", "second event recap"), NA, tag)),
-                clip = ifelse(clip %in% c("NO", "NONE", "NA"), NA, clip),
+                tag = as.numeric(tag),
+                clip = ifelse(clip %in% c("NO", "NA"), NA, clip),
                 comment = ifelse(comment == "NA", NA, comment)
   ) %>%
   dplyr::select(-trap, -subarea)
@@ -41,7 +40,7 @@ lapply(fl, table, useNA = "ifany")
 fl[is.na(fl$fl), ] %>% 
   print(n = 100)
 
-#tags only recorded during recap event
+#check for tags only recorded during recap event
 n_records <- fl %>% dplyr::group_by(tag) %>% dplyr::summarise(n = n())
 dplyr::left_join(fl, n_records, "tag") %>% dplyr::filter(n == 1 & event == "recap")
 
@@ -53,9 +52,6 @@ mr0 <-
                 n2 = ifelse(event == "recap", 1, 0),
                 m2 = ifelse(event == "recap" & !is.na(tag), 1, 0))
 table(mr0$m2)
-mr0[which(mr0$comment == "lost floy tag"), ] # should be a recap
-mr0$m2[which(mr0$comment == "lost floy tag")] <- 1
-mr0[which(mr0$comment == "lost floy tag"), ] # should be a recap
 table(mr0$n1, mr0$n2, mr0$m2) #OK
 
 lapply(mr0, table, useNA = "ifany")
@@ -84,12 +80,31 @@ mr <-
                    tags[duplicated(tags[, c("tag", "event")]), -which(colnames(tags) == "event")], 
                    by = c("tag", "date")) %>%
   dplyr::filter(is.na(dup))
-WriteXLS::WriteXLS("mr", ".\\clean mr data to craig.xlsx", BoldHeaderRow = TRUE)
+#WriteXLS::WriteXLS("mr", ".\\clean mr data to craig.xlsx", BoldHeaderRow = TRUE)
   
 n1 <- as.vector(table(mr$n1, mr$area)["1", ])
 n2 <- as.vector(table(mr$n2, mr$area)["1", ])
 m2 <- as.vector(table(mr$m2, mr$area)["1", ])
 u2 <- n2 - m2
+
+#growth recruitment
+library(ggplot2)
+grow <- 
+  dplyr::left_join(mr[mr$m2 == 1 & !is.na(mr$tag), ], mr[mr$n1 == 1 & !is.na(mr$tag), c("tag", "fl")], "tag") %>%
+  dplyr::mutate(d = fl.x - fl.y)
+
+range(grow$d)
+ggplot(grow, aes(x = d)) +
+  geom_histogram(bins = 15) +
+  xlab(label = "Growth Increment (mm)") +
+  ylab("Number of fish") +
+  ggtitle("Neck Lake Cutthroat Trout Growth") +
+  theme_grey(base_size = 16)
+mean(grow$d, na.rm = TRUE)
+sd(grow$d, na.rm = TRUE)/sqrt(sum(m2))
+t.test(grow$d)
+plot(grow$fl.y, grow$d)
+summary(lm(d~fl.y, data = grow))
 
 #mixing
 area <- 
@@ -98,54 +113,57 @@ area <-
                    by = "tag")
 (area_tab <- table(area$area.x, area$area.y))
 apply(area_tab, 1, sum)
+sum(apply(area_tab, 1, sum))
 apply(area_tab, 2, sum)
-
-#check why sum of movement table does not match sum of m2
-mr %>%
-  dplyr::group_by(tag) %>%
-  dplyr::summarise(n1 = sum(n1), n2 = sum(n2), m2 = sum(m2)) %>%
-  dplyr::filter(m2 == 1 & (n1 + n2 != 2))
-mr[mr$n1 == 1 & is.na(mr$tag), ]
-mr[mr$m2 == 1 & is.na(mr$tag), ]
-#One fish lost tag but still known recap due to fin clip.
-#two fish missing tag but had clip so retained.
+sum(apply(area_tab, 2, sum))
+(mix_tab <- cbind(area_tab, n1 - apply(area_tab, 1, sum)))
+chisq.test(mix_tab)
 
 #marked fractions
 mf <- 
   data.frame(recovery_area = LETTERS[1:3],
-             marked = apply(area_tab, 1, sum), 
-             unmarked = u2 - apply(area_tab, 1, sum),
-             mf = round(apply(area_tab, 1, sum)/u2, 2))
+             marked = m2, 
+             unmarked = u2,
+             mf = round(m2/(m2 + u2), 2))
 mf
 chisq.test(mf[, c("marked", "unmarked")])
 
 #recovery rates
 rr <- 
   data.frame(area = LETTERS[1:3],
-             marked = apply(area_tab, 1, sum), 
-             unmarked = n1 - apply(area_tab, 1, sum),
+             recaptured = apply(area_tab, 1, sum), 
+             no_recap = n1 - apply(area_tab, 1, sum),
              mf = round(apply(area_tab, 1, sum)/n1, 2))
 rr
-chisq.test(rr[, c("marked", "unmarked")])
+chisq.test(rr[, c("recaptured", "no_recap")])
 
-plot(ecdf(mr$fl[mr$n1 == 1]))
-lines(ecdf(mr$fl[mr$m2 == 1]), col = "red")
-ks.test(mr$fl[mr$n1 == 1], mr$fl[mr$m2 == 1])
+(e2ks <- ks.test(mr$fl[mr$n1 == 1], mr$fl[mr$m2 == 1]))
+(e1ks <- ks.test(mr$fl[mr$n2 == 1], mr$fl[mr$m2 == 1]))
+(ecks <- ks.test(mr$fl[mr$n1 == 1], mr$fl[mr$n2 == 1]))
 
-plot(ecdf(mr$fl[mr$n2 == 1]))
-lines(ecdf(mr$fl[mr$m2 == 1]), col = "red")
-ks.test(mr$fl[mr$n2 == 1], mr$fl[mr$m2 == 1])
+test_results <- 
+  data.frame(
+    x = 350, y = 0.33, 
+    plot = c("Marking event selectivity", "Recapture event selectivity", "Event comparison"), 
+    text = paste0("K-S test results \n","Dmax=", 
+                  round(c(e1ks$statistic, e2ks$statistic, ecks$statistic), 2), "\n p-value=", 
+                  round(c(e1ks$p.value, e2ks$p.value, ecks$p.value), 3)))
+#ecdf
+rbind(
+  data.frame(lg = mr$fl[mr$n2 == 1], group = "Captured fish", plot = "Marking event selectivity"),
+  data.frame(lg = mr$fl[mr$m2 == 1], group = "Recaptured fish", plot = "Marking event selectivity"),
+  data.frame(lg = mr$fl[mr$n1 == 1], group = "Marked fish", plot = "Recapture event selectivity"),
+  data.frame(lg = mr$fl[mr$m2 == 1], group = "Recaptured fish", plot = "Recapture event selectivity"),
+  data.frame(lg = mr$fl[mr$n1 == 1], group = "Marked fish", plot = "Event comparison"),
+  data.frame(lg = mr$fl[mr$n2 == 1], group = "Captured fish", plot = "Event comparison")) %>%
+  ggplot(aes(x = lg, color = group)) +
+    stat_ecdf() +
+    geom_label(aes(x = x, y = y, label = text), data = test_results, inherit.aes = FALSE) +
+    facet_grid(plot ~ .) +
+    xlab(label = "Fork length (mm)") +
+    ylab("Cumulative fraction of Samples") +
+    theme_grey(base_size = 16)
 
-plot(ecdf(mr$fl[mr$n1 == 1]))
-lines(ecdf(mr$fl[mr$n2 == 1]), col = "red")
-ks.test(mr$fl[mr$n1 == 1], mr$fl[mr$n2 == 1])
-
-grow <- 
-  dplyr::left_join(mr[mr$m2 == 1 & !is.na(mr$tag), ], mr[mr$n1 == 1 & !is.na(mr$tag), c("tag", "fl")], "tag") %>%
-  dplyr::mutate(d = fl.x - fl.y)
-hist(grow$d)
-mean(grow$d, na.rm = TRUE)
-plot(grow$fl.y, grow$d)
 
 #Naive N
 N <- (sum(n1) + 1) * (sum(n2) + 1) / (sum(m2) + 1) - 1
@@ -168,15 +186,16 @@ post <- jags(data = dat,
              parameters.to.save = c("N", "n2_star", "mu", "sigma"),
              model.file = ".\\mr_jags.r",
              n.chains = 4,
-             n.iter = 1000,
+             n.iter = 25000,
              n.burnin = 500,
-             n.thin = 1,
+             n.thin = 5,
              parallel = TRUE
 )
 plot(post)
 post$summary
-N <- post$summary["N", "mean"]
-se_N <- post$summary["N", "sd"]
+(N <- post$summary["N", "mean"])
+(se_N <- post$summary["N", "sd"])
+(c(post$summary["N", "2.5%"], post$summary["N", "97.5%"]))
 abs((c(post$summary["N", "97.5%"], post$summary["N", "2.5%"]) - post$summary["N", "mean"]) / post$summary["N", "mean"])
 
 library(aslpack)
@@ -194,3 +213,42 @@ list(counts = addmargins(tab),
      test = DescTools::GTest(tab))
 library(ggplot2)
 ggplot(fl, aes(x = fl, color = gear)) + geom_density() + geom_vline(xintercept = 180) + facet_grid(event~.)
+
+
+
+#### Consistancy test by gear type???
+# n1g <- as.vector(table(mr$n1, mr$gear)["1", ])
+# n2g <- as.vector(table(mr$n2, mr$gear)["1", ])
+# m2g <- as.vector(table(mr$m2, mr$gear)["1", ])
+# u2g <- n2g - m2g
+# 
+# #mixing
+# gear <- 
+#   dplyr::left_join(mr[mr$n1 == 1, c("tag", "gear")], 
+#                    mr[mr$m2 == 1, c("tag", "gear")], 
+#                    by = "tag")
+# (gear_tab <- table(gear$gear.x, gear$gear.y))
+# apply(gear_tab, 1, sum)
+# sum(apply(gear_tab, 1, sum))
+# apply(gear_tab, 2, sum)
+# sum(apply(gear_tab, 2, sum))
+# (mix_tabgear <- cbind(gear_tab, n1g - apply(gear_tab, 1, sum)))
+# chisq.test(mix_tabgear)
+# 
+# #marked fractions
+# mfg <- 
+#   data.frame(recovery_gear = c("FT", "HL", "HT"),
+#              marked = m2g, 
+#              unmarked = u2g,
+#              mf = round(m2g/(m2g + u2g), 2))
+# mfg
+# chisq.test(mfg[, c("marked", "unmarked")])
+# 
+# #recovery rates
+# rrg <- 
+#   data.frame(area = c("FT", "HL", "HT"),
+#              recaptured = apply(gear_tab, 1, sum), 
+#              no_recap = n1g - apply(gear_tab, 1, sum),
+#              mf = round(apply(gear_tab, 1, sum)/n1g, 2))
+# rrg
+# chisq.test(rrg[, c("recaptured", "no_recap")])
