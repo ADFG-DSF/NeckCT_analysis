@@ -80,7 +80,16 @@ mr <-
                    tags[duplicated(tags[, c("tag", "event")]), -which(colnames(tags) == "event")], 
                    by = c("tag", "date")) %>%
   dplyr::filter(is.na(dup))
-#WriteXLS::WriteXLS("mr", ".\\clean mr data to craig.xlsx", BoldHeaderRow = TRUE)
+#WriteXLS::WriteXLS("mr", ".\\clean mr data to craig_Mar10.xlsx", BoldHeaderRow = TRUE)
+
+#some calculations for report
+mean(mr$fl[mr$n1 == 1]); sd(mr$fl[mr$n1 == 1])/sqrt(sum(mr$n1)); #marking event average size
+mean(mr$fl[mr$n2 == 1]); sd(mr$fl[mr$n2 == 1])/sqrt(sum(mr$n2)); #Recapture event average size
+
+mean(mr$fl[mr$gear == "FT"]); sd(mr$fl[mr$gear == "FT"])/sqrt(sum(mr$gear == "FT")); #marking event average size
+mean(mr$fl[mr$gear == "HT"]); sd(mr$fl[mr$gear == "HT"])/sqrt(sum(mr$gear == "HT")); #Recapture event average size
+mean(mr$fl[mr$gear == "HL"]); sd(mr$fl[mr$gear == "HL"])/sqrt(sum(mr$gear == "HL")); #marking event average size
+
   
 n1 <- as.vector(table(mr$n1, mr$area)["1", ])
 n2 <- as.vector(table(mr$n2, mr$area)["1", ])
@@ -206,13 +215,42 @@ lc <-
   dplyr::rename(length = fl)
 asl(lc, 
     totaldat = data.frame(total = N, se_total = se_N))
+#by harvest cutoff-marking
+lc <- 
+  mr %>% 
+  dplyr::mutate(sex = cut(fl, breaks = c(180, 273, 440), include.lowest = TRUE)) %>%
+  dplyr::filter(event == "mark") %>%
+  dplyr::rename(length = fl)
+asl(lc, 
+    totaldat = data.frame(total = 4959, se_total = 361))
+#by harvest cutoff-recapture (warning biased sample)
+lc <- 
+  mr %>% 
+  dplyr::mutate(sex = cut(fl, breaks = c(180, 273, 440), include.lowest = TRUE)) %>%
+  dplyr::filter(event == "recap") %>%
+  dplyr::rename(length = fl)
+asl(lc, 
+    totaldat = data.frame(total = N, se_total = se_N))
 
 tab <- table(mr$gear, mr$event)
 list(counts = addmargins(tab),
      proportions = round(addmargins(tab)[,1:dim(tab)[2]]/addmargins(tab)[, dim(tab)[2] + 1], 2),
      test = DescTools::GTest(tab))
 library(ggplot2)
-ggplot(fl, aes(x = fl, color = gear)) + geom_density() + geom_vline(xintercept = 180) + facet_grid(event~.)
+ggplot(fl, aes(x = fl, color = gear)) + geom_density(bw = "SJ") + geom_vline(xintercept = 180) + facet_grid(event~.)
+
+
+fl$group <- ifelse(fl$fl < 180, "< 180 mm", ifelse(fl$fl < 273, "Illegal", "Legal"))
+fl$gear <- factor(fl$gear, labels = c(FT = "Fyke Trap", HL = "Hook & Line", HT = "Hoop Trap"))
+means <- aggregate(fl ~ event + gear, fl, mean)
+ggplot(fl, aes(x = fl, fill = group)) + 
+  geom_histogram(bins = 50) + 
+  facet_grid(event ~ gear)+ 
+  geom_vline(aes(xintercept = fl), data = means, linetype = 2) +
+  scale_x_continuous(name = "Fork Length", breaks = seq(75, 425, 50)) +
+  scale_y_continuous(name = "Number of Fish") +
+  scale_fill_discrete(name = "Length Group") +
+  theme_grey(base_size = 16)
 
 
 
