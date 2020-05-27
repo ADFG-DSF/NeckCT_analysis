@@ -33,8 +33,7 @@ fl <-
                 tag = as.numeric(tag),
                 clip = ifelse(clip %in% c("NO", "NA"), NA, clip),
                 comment = ifelse(comment == "NA", NA, comment)
-  ) %>%
-  dplyr::select(-trap, -subarea)
+  )
 fl
 lapply(fl, table, useNA = "ifany")
 fl[is.na(fl$fl), ] %>% 
@@ -80,6 +79,7 @@ mr <-
                    tags[duplicated(tags[, c("tag", "event")]), -which(colnames(tags) == "event")], 
                    by = c("tag", "date")) %>%
   dplyr::filter(is.na(dup))
+#saveRDS(mr, ".//mr.rds")
 #WriteXLS::WriteXLS("mr", ".\\clean mr data to craig_Mar10.xlsx", BoldHeaderRow = TRUE)
 
 #some calculations for report
