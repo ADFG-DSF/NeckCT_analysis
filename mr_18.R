@@ -154,9 +154,26 @@ test_results <-
   data.frame(
     x = 350, y = 0.33, 
     plot = c("Marking event selectivity", "Recapture event selectivity", "Event comparison"), 
-    text = paste0("K-S test results \n","Dmax=", 
+    text = paste0(c("K-S test results \n", "K-S test results \n", "K-S test results (2018 data) \n"),"Dmax=", 
                   round(c(e1ks$statistic, e2ks$statistic, ecks$statistic), 2), "\n p-value=", 
                   round(c(e1ks$p.value, e2ks$p.value, ecks$p.value), 3)))
+#98 data
+raw98 <- 
+  readxl::read_xlsx(".\\Copy of 1998 Neck AWL Data.xlsx",
+                    sheet = 1,
+                    range = "A6:M1835",
+                    col_names = c("date", "subarea", "drop", "trap", "gear", "spp", "fl", "depth", rep("drop", 4), "tag"),
+                    col_types = c("date", "numeric", "skip", "numeric", rep("text", 2), rep("numeric", 2), rep("skip", 4), "numeric"))
+head(raw98)
+tail(raw98)
+lapply(raw98, table, useNA = "ifany")
+range(table(raw98[format(raw98$date, "%m") == "05", ]$tag))
+raw98_clean <- 
+  raw98 %>% 
+  dplyr::filter(format(date, "%m") == "05") %>%
+  dplyr::group_by(tag) %>%
+  dplyr::summarise(fl = mean(fl))
+
 #ecdf
 rbind(
   data.frame(lg = mr$fl[mr$n2 == 1], group = "Captured fish", plot = "Marking event selectivity"),
@@ -164,7 +181,8 @@ rbind(
   data.frame(lg = mr$fl[mr$n1 == 1], group = "Marked fish", plot = "Recapture event selectivity"),
   data.frame(lg = mr$fl[mr$m2 == 1], group = "Recaptured fish", plot = "Recapture event selectivity"),
   data.frame(lg = mr$fl[mr$n1 == 1], group = "Marked fish", plot = "Event comparison"),
-  data.frame(lg = mr$fl[mr$n2 == 1], group = "Captured fish", plot = "Event comparison")) %>%
+  data.frame(lg = mr$fl[mr$n2 == 1], group = "Captured fish", plot = "Event comparison"),
+  data.frame(lg = raw98_clean$fl, group = "May 1998", plot = "Event comparison")) %>%
   ggplot(aes(x = lg, color = group)) +
     stat_ecdf() +
     geom_label(aes(x = x, y = y, label = text), data = test_results, inherit.aes = FALSE) +
@@ -175,11 +193,11 @@ rbind(
 
 
 #Naive N
-N <- (sum(n1) + 1) * (sum(n2) + 1) / (sum(m2) + 1) - 1
-N
-vN <- (sum(n1) + 1) * (sum(n2) + 1) * (sum(n1) - sum(m2)) * (sum(n2) - sum(m2)) / (sum(m2) + 1)^2 / (sum(m2) + 2)
-sqrt(vN)
-1.96 * sqrt(vN) / N
+naiveN <- (sum(n1) + 1) * (sum(n2) + 1) / (sum(m2) + 1) - 1
+naiveN
+naivevN <- (sum(n1) + 1) * (sum(n2) + 1) * (sum(n1) - sum(m2)) * (sum(n2) - sum(m2)) / (sum(m2) + 1)^2 / (sum(m2) + 2)
+sqrt(naivevN)
+1.96 * sqrt(naivevN) / naiveN
 
 #N with growth recruitment
 library(jagsUI)
@@ -195,15 +213,17 @@ post <- jags(data = dat,
              parameters.to.save = c("N", "n2_star", "mu", "sigma"),
              model.file = ".\\mr_jags.r",
              n.chains = 4,
-             n.iter = 25000,
+             n.iter = 2500,
              n.burnin = 500,
              n.thin = 5,
              parallel = TRUE
 )
 plot(post)
 post$summary
-(N <- post$summary["N", "mean"])
+(N <- post$summary["N", "mean"]) 
+N <- 4959
 (se_N <- post$summary["N", "sd"])
+se_N <- 361
 (c(post$summary["N", "2.5%"], post$summary["N", "97.5%"]))
 abs((c(post$summary["N", "97.5%"], post$summary["N", "2.5%"]) - post$summary["N", "mean"]) / post$summary["N", "mean"])
 
@@ -213,45 +233,103 @@ lc <-
   dplyr::mutate(sex = cut(fl, breaks = seq(180, 440, 20), include.lowest = TRUE)) %>%
   dplyr::filter(event == "mark") %>%
   dplyr::rename(length = fl)
-asl(lc, 
-    totaldat = data.frame(total = N, se_total = se_N))
+asl(lc, totaldat = data.frame(total = 4959, se_total = 361))
 #by harvest cutoff-marking
-lc <- 
+lc2 <- 
   mr %>% 
   dplyr::mutate(sex = cut(fl, breaks = c(180, 273, 440), include.lowest = TRUE)) %>%
   dplyr::filter(event == "mark") %>%
   dplyr::rename(length = fl)
-asl(lc, 
-    totaldat = data.frame(total = 4959, se_total = 361))
-#by harvest cutoff-recapture (warning biased sample)
-lc <- 
-  mr %>% 
-  dplyr::mutate(sex = cut(fl, breaks = c(180, 273, 440), include.lowest = TRUE)) %>%
-  dplyr::filter(event == "recap") %>%
-  dplyr::rename(length = fl)
-asl(lc, 
-    totaldat = data.frame(total = N, se_total = se_N))
+asl(lc2, totaldat = data.frame(total = 4959, se_total = 361))
+# #by harvest cutoff-recapture (warning biased sample)
+# lc <- 
+#   mr %>% 
+#   dplyr::mutate(sex = cut(fl, breaks = c(180, 273, 440), include.lowest = TRUE)) %>%
+#   dplyr::filter(event == "recap") %>%
+#   dplyr::rename(length = fl)
+# asl(lc, 
+#     totaldat = data.frame(total = 4959, se_total = 361))
 
 tab <- table(mr$gear, mr$event)
 list(counts = addmargins(tab),
      proportions = round(addmargins(tab)[,1:dim(tab)[2]]/addmargins(tab)[, dim(tab)[2] + 1], 2),
      test = DescTools::GTest(tab))
 library(ggplot2)
-ggplot(fl, aes(x = fl, color = gear)) + geom_density(bw = "SJ") + geom_vline(xintercept = 180) + facet_grid(event~.)
+fl$event <- factor(fl$event, levels = c("mark", "recap"), labels = c("Marking Event", "Recapture Event"))
+ggplot(fl, aes(x = fl, color = gear)) + 
+  geom_line(bw = "bcv", stat = "density") + 
+  geom_vline(xintercept = 180) + facet_grid(event~.) +
+  scale_x_continuous(name = "Fork Length", breaks = seq(75, 425, 50)) +
+  scale_y_continuous(name = "density") +
+  scale_color_discrete(name = "Gear Type") +
+  theme_grey(base_size = 16)
+#lg samples from each net share a distribution during the marking event but differ during the recapture event
+ks.test(fl$fl[fl$gear == "FT" & fl$event == "Marking Event"], fl$fl[fl$gear == "HT" & fl$event == "Marking Event"])
+ks.test(fl$fl[fl$gear == "FT" & fl$event == "Marking Event"], fl$fl[fl$gear == "HL" & fl$event == "Marking Event"])
+ks.test(fl$fl[fl$gear == "HT" & fl$event == "Marking Event"], fl$fl[fl$gear == "HL" & fl$event == "Marking Event"])
+
+ks.test(fl$fl[fl$gear == "FT" & fl$event == "Recapture Event"], fl$fl[fl$gear == "HT" & fl$event == "Recapture Event"])
+ks.test(fl$fl[fl$gear == "FT" & fl$event == "Recapture Event"], fl$fl[fl$gear == "HL" & fl$event == "Recapture Event"])
+ks.test(fl$fl[fl$gear == "HT" & fl$event == "Recapture Event"], fl$fl[fl$gear == "HL" & fl$event == "Recapture Event"])
+
 
 
 fl$group <- ifelse(fl$fl < 180, "< 180 mm", ifelse(fl$fl < 273, "Illegal", "Legal"))
-fl$gear <- factor(fl$gear, labels = c(FT = "Fyke Trap", HL = "Hook & Line", HT = "Hoop Trap"))
-means <- aggregate(fl ~ event + gear, fl, mean)
+fl$gear2 <- factor(fl$gear, labels = c(FT = "Funnel Trap", HL = "Hook & Line", HT = "Hoop Trap"))
+means <- aggregate(fl ~ event + gear2, fl, mean)
 ggplot(fl, aes(x = fl, fill = group)) + 
   geom_histogram(bins = 50) + 
-  facet_grid(event ~ gear)+ 
+  facet_grid(gear2 ~ event)+ 
   geom_vline(aes(xintercept = fl), data = means, linetype = 2) +
   scale_x_continuous(name = "Fork Length", breaks = seq(75, 425, 50)) +
   scale_y_continuous(name = "Number of Fish") +
   scale_fill_discrete(name = "Length Group") +
   theme_grey(base_size = 16)
 
+#reduced samples to detect % legal
+dates_mark <- lapply(1:8, function(x) {combn(unique(lc2$date), x, simplify = FALSE)})
+# get mean for each date combination
+mean_mark <- 
+  lapply(1:8, function(y) {
+    sapply(dates_mark[[y]], 
+           function(x){
+             tab <- asl(lc2[lc$date %in% x, ], totaldat = data.frame(total = 4959, se_total = 361))
+             c(mu = tab$p.z[1], sd = tab$sd_p.z[1], n1 = tab$n.z[1], n = tab$n.z[3], lb = tab$lci_p.z[1], ub = tab$uci_p.z[1],
+               areas = length(unique(factor(lc[lc$date %in% x, ]$subarea, 1:9, rep(LETTERS[1:3], each = 3)))),
+               subareas = length(unique(lc[lc$date %in% x, ]$subarea)))}) %>% 
+      t() %>%
+      as.data.frame() %>%
+      dplyr::mutate(days = paste0(y, " days"),
+                    combination = 1:dplyr::n())}
+  ) %>% 
+  do.call(rbind, .)
+names(mean_mark) <- c("mu", "sd", "n1", "n", "lb", "ub", "areas", "subareas", "days", "combination")
+
+ggplot(mean_mark, aes(x = combination, y = mu)) + #, color = as.factor(areas))) +
+  geom_point() +
+  geom_errorbar(aes(ymin = lb, ymax = ub)) +
+  annotate(geom = "rect", ymin = 0.839, ymax = 0.885, xmin = 1, xmax = max(mean_mark$combination), alpha = 0.2) +
+  facet_wrap(days ~ ., nrow = 4, ncol = 2) +
+  scale_y_continuous(name = "Percent < 11 inches total length") +
+  scale_x_continuous(name = "Combination") +
+  theme_bw(base_size = 16)
+
+aggregate(subareas ~ days, mean_mark, range)
+aggregate(subareas ~ days, mean_mark, mean)
+
+mean_mark$inCI <- 0.839 <= mean_mark$mu & mean_mark$mu <= 0.885
+aggregate(inCI ~ days, mean_mark, mean)
+aggregate(inCI ~ days, mean_mark, sum)
+aggregate(inCI ~ days, mean_mark, length)
+aggregate(mu ~ days, mean_mark, range)
+
+aggregate(n1 ~ days, mean_mark, mean)
+(n <- aggregate(n ~ days, mean_mark, mean))
+#Average SE
+aggregate(sd ~ days, mean_mark, mean)
+sqrt((5000 - n[2]) / 5000 * .86 * .14 / n[2])
+#worst case
+sqrt(.5 * .5 / n[2])
 
 
 #### Consistancy test by gear type???

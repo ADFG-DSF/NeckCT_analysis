@@ -129,9 +129,9 @@ dat_plot %>%
 
 #R&R accuracy prediction (large sample approximation breaks down for small samples)
 RR <- function(D, A = 0.5, alpha = 0.05) abs(pnorm(A*sqrt(D)/(1-A)) - pnorm(-A*sqrt(D)/(1+A)) - (1 - alpha))
-(n <- lapply(3:8, function(x) x * sum(mu[,2])))
+(n <-sapply(3:8, function(x) x * sum(mu0[,2])))
 D <- lapply(n, function(x) x*x*(5000 - 1)/(5000 - x)/(5000 - x))
-lapply(D, function(x) optimize(RR, c(0, 1), D = x, alpha = 0.05)$minimum)
+A <- sapply(D, function(x) optimize(RR, c(0, 1), D = x, alpha = 0.05)$minimum)
 
 #Accuracy of sampling approach
 dat_plot %>%
@@ -139,3 +139,17 @@ dat_plot %>%
   dplyr::group_by(p) %>%
   dplyr::summarise(A = mean(A))
 
+(n_equal <- sapply(3:8, function(x) x * sum(mu0[,2] * c(2, 1, 1/2))))
+D_equal <- lapply(n_equal, function(x) x*x*(5000 - 1)/(5000 - x)/(5000 - x))
+A_equal <- sapply(D_equal, function(x) optimize(RR, c(0, 1), D = x, alpha = 0.05)$minimum)
+
+(n_switch <- sapply(3:8, function(x) x * sum(mu0[,2] * c(4, 1, 1/4))))
+D_switch <- lapply(n_switch, function(x) x*x*(5000 - 1)/(5000 - x)/(5000 - x))
+A_switch <- sapply(D_switch, function(x) optimize(RR, c(0, 1), D = x, alpha = 0.05)$minimum)
+
+(n_funnel <- sapply(3:8, function(x) x * sum(mu0[1:2,2] * c(5, 1))))
+D_funnel <- lapply(n_funnel, function(x) x*x*(5000 - 1)/(5000 - x)/(5000 - x))
+A_funnel <- sapply(D_funnel, function(x) optimize(RR, c(0, 1), D = x, alpha = 0.05)$minimum)
+
+knitr::kable(data.frame(n*2, n_equal*2, n_switch*2, n_funnel*2), digits = 0)
+knitr::kable(data.frame(A, A_equal, A_switch, A_funnel), digits = 2)
