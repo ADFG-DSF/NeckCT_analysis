@@ -115,6 +115,16 @@ t.test(grow$d)
 plot(grow$fl.y, grow$d)
 summary(lm(d~fl.y, data = grow))
 
+#Catch vrs. depth
+#Note: used excel figure in report.
+#not an exact match but the trends match
+#never investigated differences
+mr[mr$gear != "HL", ] %>%
+   dplyr::mutate(depth_g = cut(depth * 0.3048, breaks = c(0, 3.1, 6.1, 9.1, 12.2, 15.2, 100))) %>%
+   ggplot(aes(x = depth_g, fill = event)) +
+   geom_bar(position = "dodge") +
+   facet_grid(gear ~ .)
+
 #mixing
 area <- 
   dplyr::left_join(mr[mr$n1 == 1, c("tag", "area")], 
@@ -190,6 +200,7 @@ rbind(
     xlab(label = "Fork length (mm)") +
     ylab("Cumulative fraction of Samples") +
     theme_grey(base_size = 16)
+
 
 
 #Naive N
