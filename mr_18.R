@@ -1,3 +1,5 @@
+##### Note: this code contains most of the analsyis used in the final report #####
+
 library(magrittr)
 raw <- 
   readxl::read_xlsx(".\\Neck 2018 AWL Data Combined To Adam 12_17_18 CJS Edits 1_23_19.xlsx",
