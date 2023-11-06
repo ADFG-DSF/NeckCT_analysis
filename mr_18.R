@@ -1,6 +1,12 @@
-##### Note: this code contains most of the analsyis used in the final report #####
-
+##### Note: this code contains most of the analysis used in the final report #####
 library(magrittr)
+library(ggplot2)
+#source an asl function for later use
+source(".\\ASL_funs.R")
+
+
+# Read and clean data -----------------------------------------------------
+
 raw <- 
   readxl::read_xlsx(".\\Neck 2018 AWL Data Combined To Adam 12_17_18 CJS Edits 1_23_19.xlsx",
                     sheet = 1,
@@ -42,7 +48,7 @@ fl[is.na(fl$fl), ] %>%
   print(n = 100)
 
 #check for tags only recorded during recap event
-n_records <- fl %>% dplyr::group_by(tag) %>% dplyr::summarise(n = n())
+n_records <- fl %>% dplyr::group_by(tag) %>% dplyr::summarise(n = dplyr::n())
 dplyr::left_join(fl, n_records, "tag") %>% dplyr::filter(n == 1 & event == "recap")
 
 mr0 <- 
@@ -99,6 +105,7 @@ m2 <- as.vector(table(mr$m2, mr$area)["1", ])
 u2 <- n2 - m2
 
 #growth recruitment
+# Figure 3 ----------------------------------------------------------------
 library(ggplot2)
 grow <- 
   dplyr::left_join(mr[mr$m2 == 1 & !is.na(mr$tag), ], mr[mr$n1 == 1 & !is.na(mr$tag), c("tag", "fl")], "tag") %>%
@@ -117,8 +124,9 @@ t.test(grow$d)
 plot(grow$fl.y, grow$d)
 summary(lm(d~fl.y, data = grow))
 
-#Catch vrs. depth
-#Note: used excel figure in report.
+
+# Catch vrs. Depth --------------------------------------------------------
+#Note: used excel figure in report. (Figure 4)
 #not an exact match but the trends match
 #never investigated differences
 mr[mr$gear != "HL", ] %>%
@@ -186,6 +194,9 @@ raw98_clean <-
   dplyr::group_by(tag) %>%
   dplyr::summarise(fl = mean(fl))
 
+
+# Figure 5 length selectivity ---------------------------------------------
+
 #ecdf
 rbind(
   data.frame(lg = mr$fl[mr$n2 == 1], group = "Captured fish", plot = "Marking event selectivity"),
@@ -212,7 +223,8 @@ naivevN <- (sum(n1) + 1) * (sum(n2) + 1) * (sum(n1) - sum(m2)) * (sum(n2) - sum(
 sqrt(naivevN)
 1.96 * sqrt(naivevN) / naiveN
 
-#N with growth recruitment
+
+# N w growth recruitment --------------------------------------------------
 library(jagsUI)
 dat <- list(n1 = sum(n1),
             m2 = sum(m2),
@@ -240,7 +252,9 @@ se_N <- 361
 (c(post$summary["N", "2.5%"], post$summary["N", "97.5%"]))
 abs((c(post$summary["N", "97.5%"], post$summary["N", "2.5%"]) - post$summary["N", "mean"]) / post$summary["N", "mean"])
 
-library(aslpack)
+
+# size comps --------------------------------------------------------------
+
 lc <- 
   mr %>% 
   dplyr::mutate(sex = cut(fl, breaks = seq(180, 440, 20), include.lowest = TRUE)) %>%
@@ -267,7 +281,10 @@ tab <- table(mr$gear, mr$event)
 list(counts = addmargins(tab),
      proportions = round(addmargins(tab)[,1:dim(tab)[2]]/addmargins(tab)[, dim(tab)[2] + 1], 2),
      test = DescTools::GTest(tab))
-library(ggplot2)
+
+
+# Fig 7 length density ----------------------------------------------------
+
 fl$event <- factor(fl$event, levels = c("mark", "recap"), labels = c("Marking Event", "Recapture Event"))
 ggplot(fl, aes(x = fl, color = gear)) + 
   geom_line(bw = "bcv", stat = "density") + 
@@ -286,6 +303,8 @@ ks.test(fl$fl[fl$gear == "FT" & fl$event == "Recapture Event"], fl$fl[fl$gear ==
 ks.test(fl$fl[fl$gear == "HT" & fl$event == "Recapture Event"], fl$fl[fl$gear == "HL" & fl$event == "Recapture Event"])
 
 
+
+# Fig 6 length dist -------------------------------------------------------
 
 fl$group <- ifelse(fl$fl < 180, "< 180 mm", ifelse(fl$fl < 273, "Illegal", "Legal"))
 fl$gear2 <- factor(fl$gear, labels = c(FT = "Funnel Trap", HL = "Hook & Line", HT = "Hoop Trap"))
@@ -317,6 +336,10 @@ mean_mark <-
   ) %>% 
   do.call(rbind, .)
 names(mean_mark) <- c("mu", "sd", "n1", "n", "lb", "ub", "areas", "subareas", "days", "combination")
+
+
+# Fig 9 Sim size estimates ------------------------------------------------
+
 
 ggplot(mean_mark, aes(x = combination, y = mu)) + #, color = as.factor(areas))) +
   geom_point() +
