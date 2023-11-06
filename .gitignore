@@ -2,6 +2,8 @@
 .Rhistory
 .RData
 .Ruserdata
-*.xlsx
-*.Rproj
 *.html
+*.xlsx
+
+!Copy of 1998 Neck AWL Data.xlsx
+!Neck 2018 AWL Data Combined To Adam 12_17_18 CJS Edits 1_23_19.xlsx

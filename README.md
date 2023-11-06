@@ -12,7 +12,7 @@ The key files for this analysis is as follows:
 
 -   mr.rds: Cleaned data associated with this analysis.
 
--   Neck Lake Cutthroat Data 1996-98.xlsx: Neck Lake cutthroat trout stock assessment data from 1996-1998.
+-   Copy of 1998 Neck AWL Data.xlsx: Neck Lake cutthroat trout stock assessment data from 1998.
 
 -   mr_18.R: R code which contains most of the analysis in this report.
 
